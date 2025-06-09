@@ -1,4 +1,7 @@
-import torch
+try:
+    import torch
+except Exception:
+    torch = None
 from .device_manager import DeviceManager
 from .adaptive_model_loader import AdaptiveModelLoader
 from .language_detector import LanguageDetector
@@ -15,16 +18,19 @@ class OCRPipeline:
     def process_document(self, image_bytes):
         device = self.device_manager.select_optimal_device()
         models = self.model_loader.load_for_device(device)
-        if device == 'gpu':
-            processor, model = models['ocr']
-            image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-            pixel_values = processor(images=image, return_tensors='pt').pixel_values
-            pixel_values = pixel_values.to('cuda')
-            with torch.no_grad():
-                generated_ids = model.generate(pixel_values)
-            text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        if device == 'gpu' and torch is not None:
+            try:
+                processor, model = models['ocr']
+                pixel_values = processor(images=image, return_tensors='pt').pixel_values
+                pixel_values = pixel_values.to('cuda')
+                with torch.no_grad():
+                    generated_ids = model.generate(pixel_values)
+                text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            except Exception:
+                text = models['ocr'].image_to_string(image)
         else:
-            text = models['ocr'].image_to_string(Image.open(io.BytesIO(image_bytes)))
+            text = models['ocr'].image_to_string(image)
 
         lang = self.language_detector.detect_language(text)
         return {"text": text, "language": lang}

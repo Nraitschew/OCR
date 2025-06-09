@@ -1,5 +1,10 @@
-import torch
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+try:
+    import torch
+    from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+except Exception:  # transformers or torch might be missing
+    torch = None
+    TrOCRProcessor = None
+    VisionEncoderDecoderModel = None
 import pytesseract
 
 class AdaptiveModelLoader:
@@ -9,6 +14,8 @@ class AdaptiveModelLoader:
         self.cpu_models = {}
 
     def load_gpu_models(self):
+        if torch is None or TrOCRProcessor is None:
+            raise RuntimeError("GPU OCR libraries are unavailable")
         processor = TrOCRProcessor.from_pretrained('microsoft/trocr-small-printed')
         model = VisionEncoderDecoderModel.from_pretrained('microsoft/trocr-small-printed')
         model.to('cuda')
@@ -19,11 +26,17 @@ class AdaptiveModelLoader:
         self.cpu_models['ocr'] = pytesseract
 
     def load_for_device(self, device='auto'):
+        if device == 'auto':
+            device = 'gpu' if torch is not None and torch.cuda.is_available() else 'cpu'
+
         if device == 'gpu':
-            if not self.gpu_models:
-                self.load_gpu_models()
-            return self.gpu_models
-        else:
-            if not self.cpu_models:
-                self.load_cpu_models()
-            return self.cpu_models
+            try:
+                if not self.gpu_models:
+                    self.load_gpu_models()
+                return self.gpu_models
+            except Exception:
+                device = 'cpu'
+
+        if not self.cpu_models:
+            self.load_cpu_models()
+        return self.cpu_models
