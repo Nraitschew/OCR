@@ -1,0 +1,6 @@
+pytesseract
+Pillow
+torch
+transformers
+langdetect
+python-magic
