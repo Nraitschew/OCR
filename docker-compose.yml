@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   ocr-api:
-    build: .
+    build: 
+      context: .
+      no_cache: true  # Always rebuild from scratch to get latest GitHub code
     container_name: ocr-service
     ports:
       - "4000:4000"
