@@ -1,0 +1,27 @@
+ÜBERSCHRIFT
+
+Einleitung:
+Dies ist ein komplexes Dokument mit verschiedenen Formatierungen.
+
+1. Nummerierte Liste:
+   1.1 Unterpunkt eins
+   1.2 Unterpunkt zwei
+   
+2. Zweiter Hauptpunkt
+   - Aufzählung A
+   - Aufzählung B
+
+Code-Beispiel:
+    def hello_world():
+        print("Hallo Welt!")
+        
+Zitat:
+"Dies ist ein wichtiges Zitat mit Anführungszeichen."
+
+Kontaktdaten:
+Max Mustermann
+Musterstraße 123
+80331 München
+Tel: +49 89 12345678
+
+Ende des Dokuments.

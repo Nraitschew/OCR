@@ -1,0 +1,39 @@
+# CPU-Only OCR System Requirements
+# Optimized for CPU usage without GPU dependencies
+
+# Core OCR (CPU-based)
+pytesseract>=0.3.10
+
+# Document Processing
+PyMuPDF>=1.23.0
+pdf2image>=1.16.3
+python-docx>=1.1.0
+Pillow>=10.0.0
+
+# Language Detection
+fast-langdetect>=0.2.0
+
+# Table Extraction
+pdfplumber>=0.10.3
+tabulate>=0.9.0
+
+# Performance & Monitoring
+psutil>=5.9.0
+
+# Utilities (CPU-optimized)
+numpy>=1.24.0
+pandas>=2.0.0
+opencv-python-headless>=4.8.0  # Headless version is lighter
+requests>=2.31.0
+aiohttp>=3.9.0
+aiofiles>=23.2.1
+beautifulsoup4>=4.12.0
+fpdf2>=2.7.0
+matplotlib>=3.7.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Note: Removed torch, easyocr, paddleocr as they require GPU/large models
+# Using only Tesseract for OCR which is CPU-optimized

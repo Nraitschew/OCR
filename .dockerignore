@@ -1,0 +1,43 @@
+# Virtual environments
+venv/
+venv_cpu/
+env/
+ENV/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Logs and output
+logs/
+output/
+temp/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation (since we're cloning from GitHub anyway)
+*.md
+
+# Test outputs
+test_linebreaks/
+test_documents_enhanced/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (prevent recursion)
+Dockerfile
+docker-compose.yml
+.dockerignore

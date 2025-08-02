@@ -1,0 +1,9 @@
+The quick brown fox jumps over the lazy dog.
+
+Python is a powerful programming language.
+
+Machine learning revolutionizes data analysis.
+
+Welcome to the world of artificial intelligence.
+
+Document processing made easy with OCR.
