@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   ocr-api:
-    build: .
+    build: https://github.com/Nraitschew/OCR.git#main
     container_name: ocr-service
     ports:
       - "4000:4000"
@@ -10,8 +10,7 @@ services:
       - OCR_API_PORT=4000
       - OCR_API_HOST=0.0.0.0
       - PYTHONUNBUFFERED=1
-    env_file:
-      - .env
+      - KEY=${KEY}
     volumes:
       - ocr-logs:/app/logs
       - ocr-temp:/app/temp
