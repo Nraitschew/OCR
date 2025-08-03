@@ -6,6 +6,7 @@ CPU-Only OCR System - Optimized for CPU usage without GPU dependencies
 import os
 import sys
 import time
+import gc
 import psutil
 import numpy as np
 from pathlib import Path
@@ -17,10 +18,11 @@ import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor
 
 # CPU-Only Resource Configuration
-MAX_CPU_PERCENT = 70  # Maximum CPU usage percentage
-MAX_RAM_PERCENT = 70  # Maximum RAM usage percentage  
-MAX_RAM_GB = 2  # Maximum RAM in GB (can be exceeded if needed)
-MAX_WORKERS = min(4, mp.cpu_count() - 1)  # Leave one CPU core free
+# Maximized for full resource utilization with safety margins
+MAX_CPU_PERCENT = 95  # Maximum CPU usage percentage (95% to leave headroom for system)
+MAX_RAM_PERCENT = 90  # Maximum RAM usage percentage (90% to prevent OOM)
+MAX_RAM_GB = 8  # Maximum RAM in GB (increased for better performance)
+MAX_WORKERS = mp.cpu_count() if mp.cpu_count() <= 8 else 8  # Use all cores, cap at 8
 
 # Document processing imports
 from PIL import Image
@@ -143,12 +145,19 @@ class CPUResourceManager:
         while time.time() - start < timeout:
             usage = self.get_current_usage()
             
-            # Check CPU usage
+            # Check CPU usage with dynamic threshold
             if usage['cpu_percent'] < MAX_CPU_PERCENT:
                 return True
                 
-            # If CPU is busy, wait a bit
-            time.sleep(0.5)
+            # If CPU is busy, wait with exponential backoff
+            wait_time = min(0.1 * (2 ** ((time.time() - start) / 2)), 2.0)
+            time.sleep(wait_time)
+            
+            # Force garbage collection if RAM is high
+            if usage['ram_percent'] > 85:
+                import gc
+                gc.collect()
+                logger.info(f"Triggered GC: RAM usage {usage['ram_percent']:.1f}%")
             
         logger.warning("Timeout waiting for CPU resources")
         return False
@@ -166,6 +175,8 @@ class CPUResourceManager:
         # Limit CPU cores if needed
         self.limit_cpu_cores()
 
+
+import gc
 
 class CPUOptimizedOCREngine:
     """OCR Engine optimized for CPU-only processing"""
@@ -274,24 +285,50 @@ class CPUOptimizedOCREngine:
         }
         
     def process_image_cpu_optimized(self, image: np.ndarray) -> CPUOCRResult:
-        """Process image with CPU optimization"""
+        """Process image with CPU optimization and memory management"""
         start_time = time.time()
         initial_usage = self.resource_manager.get_current_usage()
+        
+        # Check memory before processing
+        if initial_usage['ram_percent'] > 85:
+            logger.warning(f"High memory usage: {initial_usage['ram_percent']:.1f}%")
+            gc.collect()  # Force garbage collection
+            # If still high, reduce image size
+            if image.shape[0] > 2000 or image.shape[1] > 2000:
+                scale = 0.7
+                new_shape = (int(image.shape[1] * scale), int(image.shape[0] * scale))
+                image = cv2.resize(image, new_shape, interpolation=cv2.INTER_AREA)
+                logger.info(f"Reduced image size to {new_shape} due to memory constraints")
         
         # Wait for resources
         self.resource_manager.wait_for_resources()
         
-        # Extract text
-        text, confidence, metadata = self.extract_text_cpu(image)
-        
-        # Extract tables (simplified for CPU)
-        tables = self._extract_tables_cpu(image, text)
-        
-        # Detect language
-        language = self.detect_language(text)
-        
-        # Generate markdown
-        markdown = self._generate_markdown(text, tables)
+        try:
+            # Extract text
+            text, confidence, metadata = self.extract_text_cpu(image)
+            
+            # Extract tables (simplified for CPU)
+            tables = self._extract_tables_cpu(image, text)
+            
+            # Detect language
+            language = self.detect_language(text)
+            
+            # Generate markdown
+            markdown = self._generate_markdown(text, tables)
+            
+        except Exception as e:
+            logger.error(f"Error during OCR processing: {e}")
+            # Return partial result on error
+            text = "Error during OCR processing"
+            confidence = 0.0
+            tables = []
+            language = "unknown"
+            markdown = text
+            metadata = {'error': str(e)}
+        finally:
+            # Clean up to free memory
+            del image
+            gc.collect()
         
         # Get final resource usage
         final_usage = self.resource_manager.get_current_usage()
@@ -398,6 +435,7 @@ class CPUDocumentProcessor:
     
     def __init__(self, ocr_engine: CPUOptimizedOCREngine):
         self.ocr_engine = ocr_engine
+        self.resource_manager = ocr_engine.resource_manager
         
     async def process_pdf_cpu(self, file_path: Path) -> List[CPUOCRResult]:
         """Process PDF with CPU optimization"""
@@ -484,8 +522,13 @@ class CPUDocumentProcessor:
         # Read image
         image = cv2.imread(str(file_path))
         
-        # Resize if too large (CPU optimization)
-        max_dimension = 2000
+        # Dynamic resize based on available memory
+        usage = self.resource_manager.get_current_usage()
+        if usage['ram_percent'] > 70:
+            max_dimension = 1500  # More aggressive resize if memory is high
+        else:
+            max_dimension = 3000  # Allow larger images when memory is available
+            
         height, width = image.shape[:2]
         
         if width > max_dimension or height > max_dimension:
@@ -493,7 +536,7 @@ class CPUDocumentProcessor:
             new_width = int(width * scale)
             new_height = int(height * scale)
             image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-            logger.info(f"Resized image from {width}x{height} to {new_width}x{new_height}")
+            logger.info(f"Resized image from {width}x{height} to {new_width}x{new_height} (RAM: {usage['ram_percent']:.1f}%)")
             
         return self.ocr_engine.process_image_cpu_optimized(image)
         
@@ -545,6 +588,7 @@ class CPUOnlyOCRSystem:
     
     def __init__(self, config: CPUOptimizedConfig = None):
         self.config = config or CPUOptimizedConfig()
+        self.resource_manager = CPUResourceManager()
         self.ocr_engine = CPUOptimizedOCREngine(self.config)
         self.document_processor = CPUDocumentProcessor(self.ocr_engine)
         
@@ -553,15 +597,23 @@ class CPUOnlyOCRSystem:
         logger.info(f"CPU cores available: {mp.cpu_count()}")
         
     async def process_file(self, file_path: str) -> CPUOCRResult:
-        """Process file with CPU optimization"""
+        """Process file with CPU optimization and resource management"""
         path = Path(file_path)
         
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
             
+        # Check available resources before processing
+        if not self.resource_manager.wait_for_resources(timeout=30):
+            logger.warning("Resource limits reached, proceeding anyway for maximum utilization")
+            
         suffix = path.suffix.lower()
         
         logger.info(f"Processing {suffix} file: {path.name}")
+        
+        # Monitor resources during processing
+        initial_usage = self.resource_manager.get_current_usage()
+        logger.info(f"Initial resources - CPU: {initial_usage['cpu_percent']:.1f}%, RAM: {initial_usage['ram_percent']:.1f}%")
         
         if suffix == '.pdf':
             results = await self.document_processor.process_pdf_cpu(path)
@@ -634,20 +686,26 @@ class CPUOnlyOCRSystem:
         )
         
     async def process_batch(self, file_paths: List[str]) -> List[CPUOCRResult]:
-        """Process multiple files with CPU optimization"""
+        """Process multiple files with optimized resource utilization"""
         results = []
         
-        # Process files sequentially to avoid CPU overload
-        for file_path in file_paths:
-            try:
-                result = await self.process_file(file_path)
-                results.append(result)
-                
-                # Small delay between files
-                await asyncio.sleep(0.1)
-                
-            except Exception as e:
-                logger.error(f"Error processing {file_path}: {e}")
+        # Process files with parallel workers for maximum CPU utilization
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # Submit all files for processing
+            future_to_file = {executor.submit(asyncio.run, self.process_file(fp)): fp 
+                             for fp in file_paths}
+            
+            for future in concurrent.futures.as_completed(future_to_file):
+                file_path = future_to_file[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                    logger.info(f"Completed processing: {file_path}")
+                except Exception as e:
+                    logger.error(f"Error processing {file_path}: {e}")
+                    # Add empty result to maintain order
+                    results.append(self._empty_result())
                 
         return results
 

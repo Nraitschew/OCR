@@ -15,8 +15,8 @@ services:
       - ocr-logs:/app/logs
       - ocr-temp:/app/temp
     restart: unless-stopped
-    mem_limit: 2g
-    cpus: '0.7'
+    mem_limit: 8g
+    cpus: '0.95'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
       interval: 30s

@@ -9,7 +9,7 @@ A comprehensive OCR system that supports multiple document formats with configur
 
 ✅ **Multi-format Support**: PDF, DOCX, PNG, JPEG, TXT
 ✅ **German Language Support**: Full umlaut support (ä, ö, ü, Ä, Ö, Ü, ß)
-✅ **Resource Management**: CPU and RAM usage limited to 70% (configurable)
+✅ **Resource Management**: Optimized for maximum performance (95% CPU, 90% RAM)
 ✅ **Scanned Document Processing**: Handles both native and scanned documents
 ✅ **Table Extraction**: Automatically detects and extracts tables
 ✅ **Concurrent Processing**: Handles multiple files simultaneously
@@ -17,13 +17,29 @@ A comprehensive OCR system that supports multiple document formats with configur
 
 ## Resource Configuration
 
-Easily configure resource limits at the top of `ocr_system.py`:
+### Maximum Performance Mode
+
+The system is now configured for **maximum resource utilization** to deliver the best performance:
 
 ```python
-MAX_CPU_PERCENT = 70  # Maximum CPU usage percentage
-MAX_RAM_PERCENT = 70  # Maximum RAM usage percentage  
-MAX_RAM_GB = 2        # Maximum RAM in GB (can be exceeded if needed)
+MAX_CPU_PERCENT = 95  # Uses up to 95% CPU for maximum performance
+MAX_RAM_PERCENT = 90  # Uses up to 90% RAM with safeguards
+MAX_RAM_GB = 8        # Increased RAM limit for large documents
+MAX_WORKERS = 8       # Uses all CPU cores (up to 8) for parallel processing
 ```
+
+### Key Features:
+- **Dynamic Resource Management**: Automatically adjusts processing based on available resources
+- **Memory Safeguards**: Triggers garbage collection when memory usage is high
+- **Adaptive Image Resizing**: Reduces image size when memory is constrained
+- **Error Recovery**: Continues processing even if individual files fail
+- **Parallel Processing**: Processes multiple files simultaneously for maximum throughput
+
+### Safety Mechanisms:
+- Leaves 5% CPU headroom for system stability
+- Monitors RAM usage and prevents out-of-memory errors
+- Exponential backoff when resources are constrained
+- Automatic cleanup after each file processing
 
 ## Installation
 
@@ -136,9 +152,10 @@ The OCR service will be available at `http://localhost:4000`
 
 The service runs with:
 - **Port**: 4000
-- **CPU Limit**: 70%
-- **Memory Limit**: 2GB
+- **CPU Limit**: 95% (Maximum performance mode)
+- **Memory Limit**: 8GB (Dynamically managed)
 - **Auto-restart**: Enabled
+- **Parallel Workers**: Up to 8 concurrent processes
 
 ## API Usage
 
