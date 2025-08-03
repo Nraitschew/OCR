@@ -29,11 +29,8 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Clone the latest version from GitHub
-# Use --depth 1 for faster cloning (only latest commit)
-RUN git clone --depth 1 https://github.com/Nraitschew/OCR.git /tmp/ocr && \
-    cp -r /tmp/ocr/* /app/ && \
-    rm -rf /tmp/ocr
+# Copy local files
+COPY . /app/
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements_api.txt

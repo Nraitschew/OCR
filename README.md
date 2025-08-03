@@ -142,6 +142,16 @@ The service runs with:
 
 ## API Usage
 
+### API Key Configuration
+
+The API requires an API key for authentication. Create a `.env` file in the project root:
+
+```bash
+KEY="your-secret-key-here"
+```
+
+**Important**: Never commit the `.env` file to version control!
+
 ### Health Check
 ```bash
 curl http://localhost:4000/health
@@ -157,16 +167,19 @@ curl http://localhost:4000/status
 # Process a PDF file
 curl -X POST -F "file=@document.pdf" \
   -F "preserve_formatting=true" \
+  -F "key=your-secret-key-here" \
   http://localhost:4000/ocr/file
 
 # Process an image
 curl -X POST -F "file=@image.png" \
   -F "preserve_formatting=true" \
+  -F "key=your-secret-key-here" \
   http://localhost:4000/ocr/file
 
 # Process a Word document
 curl -X POST -F "file=@document.docx" \
   -F "preserve_formatting=true" \
+  -F "key=your-secret-key-here" \
   http://localhost:4000/ocr/file
 ```
 
@@ -180,7 +193,8 @@ curl -X POST -H "Content-Type: application/json" \
   -d '{
     "filename": "document.pdf",
     "content": "'$(cat document.b64)'",
-    "preserve_formatting": true
+    "preserve_formatting": true,
+    "key": "your-secret-key-here"
   }' \
   http://localhost:4000/ocr/base64
 ```

@@ -12,11 +12,15 @@ from datetime import datetime
 import tempfile
 import base64
 from typing import Optional, Dict, Any
+from dotenv import load_dotenv
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
+
+# Load environment variables
+load_dotenv()
 
 # Import OCR system
 from cpu_only_ocr_system import CPUOnlyOCRSystem, get_resource_info
@@ -38,12 +42,18 @@ app = FastAPI(
 # Initialize OCR system
 ocr_system = CPUOnlyOCRSystem()
 
+# Get API key from environment
+API_KEY = os.getenv('KEY')
+if not API_KEY:
+    logger.warning("No API key found in environment. Authentication will be disabled.")
+
 
 class OCRRequest(BaseModel):
     """Request model for base64 encoded files"""
     filename: str
     content: str  # base64 encoded file content
     preserve_formatting: bool = True
+    key: str  # API key for authentication
 
 
 class OCRResponse(BaseModel):
@@ -136,9 +146,17 @@ async def system_status():
 @app.post("/ocr/file", response_model=OCRResponse)
 async def ocr_file(
     file: UploadFile = File(...),
-    preserve_formatting: bool = Form(True)
+    preserve_formatting: bool = Form(True),
+    key: str = Form(...)
 ):
     """Process uploaded file with OCR"""
+    
+    # Verify API key
+    if API_KEY and key != API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key"
+        )
     
     # Validate file type
     allowed_extensions = {".pdf", ".png", ".jpg", ".jpeg", ".txt", ".docx"}
@@ -208,6 +226,13 @@ async def ocr_file(
 @app.post("/ocr/base64", response_model=OCRResponse)
 async def ocr_base64(request: OCRRequest):
     """Process base64 encoded file with OCR"""
+    
+    # Verify API key
+    if API_KEY and request.key != API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key"
+        )
     
     # Decode base64 content
     try:
