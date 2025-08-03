@@ -11,19 +11,33 @@ from pathlib import Path
 from datetime import datetime
 import tempfile
 import base64
-from typing import Optional, Dict, Any
+import magic
+import mimetypes
+from typing import Optional, Dict, Any, Union, Tuple
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Header
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
+import json
 
 # Load environment variables
 load_dotenv()
 
 # Import OCR system
 from cpu_only_ocr_system import CPUOnlyOCRSystem, get_resource_info
+
+# Custom JSON response that doesn't escape Unicode characters
+class UnicodeJSONResponse(JSONResponse):
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":")
+        ).encode("utf-8")
 
 # Configure logging
 logging.basicConfig(
@@ -36,7 +50,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="OCR Service API",
     description="CPU-optimized OCR service with German language support",
-    version="1.0.0"
+    version="1.0.0",
+    default_response_class=UnicodeJSONResponse
 )
 
 # Initialize OCR system
@@ -76,12 +91,15 @@ async def root():
         "service": "OCR API",
         "version": "1.0.0",
         "endpoints": {
-            "POST /ocr/file": "Upload file for OCR processing",
-            "POST /ocr/base64": "Send base64 encoded file for OCR",
+            "POST /ocr": "Unified endpoint for all file uploads (multipart or base64)",
             "GET /health": "Health check endpoint",
             "GET /status": "System status and resource usage"
         },
-        "supported_formats": ["pdf", "png", "jpg", "jpeg", "txt", "docx"],
+        "supported_formats": [
+            "pdf", "png", "jpg", "jpeg", "txt", "docx",
+            "tiff", "tif", "bmp", "gif", "webp",
+            "rtf", "odt", "html", "htm", "xml", "csv"
+        ],
         "features": [
             "German language support (ä, ö, ü, Ä, Ö, Ü, ß)",
             "Line break and paragraph preservation",
@@ -110,7 +128,7 @@ async def health_check():
             "ocr_functional": result.text == test_text
         }
     except Exception as e:
-        return JSONResponse(
+        return UnicodeJSONResponse(
             status_code=503,
             content={
                 "status": "unhealthy",
@@ -143,40 +161,127 @@ async def system_status():
     }
 
 
-@app.post("/ocr/file", response_model=OCRResponse)
-async def ocr_file(
-    file: UploadFile = File(...),
-    preserve_formatting: bool = Form(True),
-    key: str = Form(...)
+def detect_file_type(content: bytes, filename: str = "") -> Tuple[str, str]:
+    """
+    Detect file type using magic numbers and filename extension
+    Returns: (mime_type, file_extension)
+    """
+    # Try to detect MIME type using magic numbers
+    try:
+        mime = magic.Magic(mime=True)
+        mime_type = mime.from_buffer(content)
+    except:
+        # Fallback to filename-based detection
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    
+    # Map MIME types to extensions
+    mime_to_ext = {
+        'application/pdf': '.pdf',
+        'image/png': '.png',
+        'image/jpeg': '.jpg',
+        'image/jpg': '.jpg',
+        'image/tiff': '.tiff',
+        'image/bmp': '.bmp',
+        'image/gif': '.gif',
+        'image/webp': '.webp',
+        'text/plain': '.txt',
+        'text/html': '.html',
+        'text/xml': '.xml',
+        'text/csv': '.csv',
+        'application/rtf': '.rtf',
+        'text/rtf': '.rtf',
+        'application/vnd.oasis.opendocument.text': '.odt',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+        'application/xml': '.xml',
+    }
+    
+    # Get extension from mime type or filename
+    ext = mime_to_ext.get(mime_type, "")
+    if not ext and filename:
+        ext = Path(filename).suffix.lower()
+    
+    return mime_type, ext
+
+
+@app.post("/ocr", response_model=OCRResponse)
+async def unified_ocr(
+    request: Request,
+    # Optional file upload (multipart)
+    file: Optional[UploadFile] = File(None),
+    preserve_formatting: bool = Form(None),
+    key: Optional[str] = Form(None),
 ):
-    """Process uploaded file with OCR"""
+    """
+    Unified OCR endpoint - accepts both multipart file uploads and base64 encoded files
+    Automatically detects file type and processes accordingly
+    """
     
-    # Verify API key
-    if API_KEY and key != API_KEY:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid API key"
-        )
+    # Check if request is JSON (base64)
+    content_type = request.headers.get("content-type", "")
     
-    # Validate file type
-    allowed_extensions = {".pdf", ".png", ".jpg", ".jpeg", ".txt", ".docx"}
-    file_ext = Path(file.filename).suffix.lower()
-    
-    if file_ext not in allowed_extensions:
+    if "application/json" in content_type:
+        # Handle JSON request with base64
+        try:
+            json_data = await request.json()
+            ocr_request = OCRRequest(**json_data)
+            
+            # Verify API key
+            if API_KEY and ocr_request.key != API_KEY:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            
+            contents = base64.b64decode(ocr_request.content)
+            filename = ocr_request.filename
+            preserve_fmt = ocr_request.preserve_formatting
+            
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON/base64 data: {e}")
+            
+    elif file and file.filename:
+        # Handle multipart file upload
+        if not key:
+            raise HTTPException(status_code=400, detail="API key required")
+        
+        # Verify API key
+        if API_KEY and key != API_KEY:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        
+        filename = file.filename
+        contents = await file.read()
+        preserve_fmt = preserve_formatting if preserve_formatting is not None else True
+        
+    else:
         raise HTTPException(
             status_code=400,
-            detail=f"File type {file_ext} not supported. Allowed types: {allowed_extensions}"
+            detail="No file provided. Send either multipart file or base64 encoded content"
         )
     
     # Check file size (50MB limit)
-    contents = await file.read()
     file_size_mb = len(contents) / (1024 * 1024)
-    
     if file_size_mb > 50:
         raise HTTPException(
             status_code=413,
             detail=f"File too large ({file_size_mb:.1f}MB). Maximum size: 50MB"
         )
+    
+    # Detect file type
+    mime_type, file_ext = detect_file_type(contents, filename)
+    
+    # Validate file type
+    allowed_extensions = {
+        ".pdf", ".png", ".jpg", ".jpeg", ".txt", ".docx",
+        ".tiff", ".tif", ".bmp", ".gif", ".webp",
+        ".rtf", ".odt", ".html", ".htm", ".xml", ".csv"
+    }
+    
+    if file_ext not in allowed_extensions:
+        # Try to get extension from filename if detection failed
+        file_ext = Path(filename).suffix.lower()
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File type not supported. Detected: {mime_type}, Extension: {file_ext}. "
+                       f"Allowed types: {sorted(allowed_extensions)}"
+            )
     
     # Save temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
@@ -194,10 +299,12 @@ async def ocr_file(
             language=result.language,
             confidence=result.confidence,
             processing_time=result.processing_time,
-            formatting_preserved=preserve_formatting,
+            formatting_preserved=preserve_fmt,
             tables_found=len(result.tables),
             metadata={
-                "filename": file.filename,
+                "filename": filename,
+                "detected_mime_type": mime_type,
+                "file_extension": file_ext,
                 "file_size_mb": round(file_size_mb, 2),
                 "cpu_usage": result.cpu_usage,
                 "ram_usage_mb": result.ram_usage_mb
@@ -216,93 +323,15 @@ async def ocr_file(
             processing_time=0.0,
             formatting_preserved=False,
             tables_found=0,
-            error=str(e)
+            error=str(e),
+            metadata={
+                "filename": filename,
+                "detected_mime_type": mime_type,
+                "file_extension": file_ext
+            }
         )
     finally:
         # Clean up temporary file
-        Path(tmp_path).unlink(missing_ok=True)
-
-
-@app.post("/ocr/base64", response_model=OCRResponse)
-async def ocr_base64(request: OCRRequest):
-    """Process base64 encoded file with OCR"""
-    
-    # Verify API key
-    if API_KEY and request.key != API_KEY:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid API key"
-        )
-    
-    # Decode base64 content
-    try:
-        file_content = base64.b64decode(request.content)
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid base64 encoding: {e}"
-        )
-    
-    # Determine file extension
-    file_ext = Path(request.filename).suffix.lower()
-    allowed_extensions = {".pdf", ".png", ".jpg", ".jpeg", ".txt", ".docx"}
-    
-    if file_ext not in allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type {file_ext} not supported"
-        )
-    
-    # Check file size
-    file_size_mb = len(file_content) / (1024 * 1024)
-    if file_size_mb > 50:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large ({file_size_mb:.1f}MB). Maximum size: 50MB"
-        )
-    
-    # Save temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
-        tmp_file.write(file_content)
-        tmp_path = tmp_file.name
-    
-    try:
-        # Process with OCR
-        result = await ocr_system.process_file(tmp_path)
-        
-        # Prepare response
-        response = OCRResponse(
-            success=True,
-            text=result.text,
-            language=result.language,
-            confidence=result.confidence,
-            processing_time=result.processing_time,
-            formatting_preserved=request.preserve_formatting,
-            tables_found=len(result.tables),
-            metadata={
-                "filename": request.filename,
-                "file_size_mb": round(file_size_mb, 2),
-                "cpu_usage": result.cpu_usage,
-                "ram_usage_mb": result.ram_usage_mb
-            }
-        )
-        
-        return response
-        
-    except Exception as e:
-        logger.error(f"OCR processing failed: {e}")
-        return OCRResponse(
-            success=False,
-            text="",
-            language="unknown",
-            confidence=0.0,
-            processing_time=0.0,
-            formatting_preserved=False,
-            tables_found=0,
-            error=str(e)
-        )
-    finally:
-        # Clean up
         Path(tmp_path).unlink(missing_ok=True)
 
 
@@ -310,7 +339,7 @@ async def ocr_base64(request: OCRRequest):
 async def general_exception_handler(request, exc):
     """Handle general exceptions"""
     logger.error(f"Unhandled exception: {exc}")
-    return JSONResponse(
+    return UnicodeJSONResponse(
         status_code=500,
         content={
             "success": False,

@@ -218,28 +218,35 @@ class CPUOptimizedOCREngine:
         return 'de'
         
     def _preprocess_image_cpu_optimized(self, image: np.ndarray) -> np.ndarray:
-        """CPU-optimized image preprocessing"""
+        """CPU-optimized image preprocessing - gentle for better Umlaut recognition"""
         # Convert to grayscale
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         else:
             gray = image
             
-        # Skip heavy preprocessing if image is already good quality
+        # Check image quality
         mean_brightness = np.mean(gray)
+        std_brightness = np.std(gray)
         
-        if 100 < mean_brightness < 200:
-            # Good brightness, minimal preprocessing
+        # If image has good contrast and brightness, return as is
+        if 80 < mean_brightness < 220 and std_brightness > 30:
             return gray
             
-        # Apply CLAHE for contrast enhancement (CPU-friendly)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(gray)
+        # Apply gentle contrast enhancement
+        # Avoid binary thresholding which can destroy Umlauts
+        if mean_brightness < 100:
+            # Dark image - brighten it
+            adjusted = cv2.convertScaleAbs(gray, alpha=1.3, beta=30)
+        elif mean_brightness > 200:
+            # Bright image - increase contrast
+            adjusted = cv2.convertScaleAbs(gray, alpha=1.2, beta=-30)
+        else:
+            # Normal brightness - just enhance contrast slightly
+            clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+            adjusted = clahe.apply(gray)
         
-        # Simple thresholding
-        _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        return binary
+        return adjusted
         
     def extract_text_cpu(self, image: np.ndarray) -> Tuple[str, float, Dict[str, Any]]:
         """CPU-optimized text extraction using Tesseract"""
@@ -581,6 +588,112 @@ class CPUDocumentProcessor:
             cpu_usage=0,
             ram_usage_mb=0
         )
+        
+    async def process_rtf_cpu(self, file_path: Path) -> CPUOCRResult:
+        """Process RTF file"""
+        start_time = time.time()
+        
+        try:
+            from striprtf.striprtf import rtf_to_text
+            with open(file_path, 'r', encoding='utf-8') as f:
+                rtf_content = f.read()
+            text = rtf_to_text(rtf_content)
+        except Exception as e:
+            logger.error(f"Error processing RTF file: {e}")
+            # Fallback: try to read as plain text
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+        
+        # Extract tables (RTF tables are harder to parse, so we use simple heuristics)
+        tables = self.ocr_engine._extract_tables_cpu(None, text)
+        
+        return CPUOCRResult(
+            text=text,
+            language=self.ocr_engine.detect_language(text),
+            confidence=1.0,
+            tables=tables,
+            markdown=self.ocr_engine._generate_markdown(text, tables),
+            processing_time=time.time() - start_time,
+            metadata={'type': 'rtf', 'size': len(text)},
+            cpu_usage=0,
+            ram_usage_mb=0
+        )
+        
+    async def process_odt_cpu(self, file_path: Path) -> CPUOCRResult:
+        """Process ODT (OpenDocument Text) file"""
+        start_time = time.time()
+        
+        try:
+            from odf import text, teletype
+            from odf.opendocument import load
+            
+            doc = load(str(file_path))
+            paragraphs = []
+            
+            # Extract paragraphs
+            for p in doc.getElementsByType(text.P):
+                text_content = teletype.extractText(p)
+                if text_content.strip():
+                    paragraphs.append(text_content)
+            
+            extracted_text = '\n'.join(paragraphs)
+            
+            # Extract tables
+            tables = []
+            from odf.table import Table, TableRow, TableCell
+            for table in doc.getElementsByType(Table):
+                rows = []
+                for tr in table.getElementsByType(TableRow):
+                    cells = []
+                    for td in tr.getElementsByType(TableCell):
+                        cell_text = teletype.extractText(td).strip()
+                        cells.append(cell_text)
+                    if any(cells):
+                        rows.append(cells)
+                
+                if rows:
+                    table_data = TableData(
+                        headers=rows[0] if len(rows) > 1 else [],
+                        rows=rows[1:] if len(rows) > 1 else rows,
+                        confidence=1.0
+                    )
+                    tables.append(table_data)
+                    
+        except Exception as e:
+            logger.error(f"Error processing ODT file: {e}")
+            # Fallback: try to extract text using a simpler method
+            import zipfile
+            import xml.etree.ElementTree as ET
+            
+            extracted_text = ""
+            try:
+                with zipfile.ZipFile(file_path, 'r') as z:
+                    with z.open('content.xml') as f:
+                        tree = ET.parse(f)
+                        root = tree.getroot()
+                        
+                        # Extract all text nodes
+                        texts = []
+                        for elem in root.iter():
+                            if elem.text:
+                                texts.append(elem.text)
+                        extracted_text = ' '.join(texts)
+            except:
+                extracted_text = "Error extracting ODT content"
+            
+            tables = []
+        
+        return CPUOCRResult(
+            text=extracted_text,
+            language=self.ocr_engine.detect_language(extracted_text),
+            confidence=1.0,
+            tables=tables,
+            markdown=self.ocr_engine._generate_markdown(extracted_text, tables),
+            processing_time=time.time() - start_time,
+            metadata={'type': 'odt', 'paragraphs': len(paragraphs) if 'paragraphs' in locals() else 0},
+            cpu_usage=0,
+            ram_usage_mb=0
+        )
 
 
 class CPUOnlyOCRSystem:
@@ -643,15 +756,39 @@ class CPUOnlyOCRSystem:
                 ram_usage_mb=max([r.ram_usage_mb for r in results]) if results else 0
             )
             
-        elif suffix in ['.png', '.jpg', '.jpeg']:
+        elif suffix in ['.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.gif', '.webp']:
             return await self.document_processor.process_image_cpu(path)
             
         elif suffix == '.docx':
             return await self.document_processor.process_docx_cpu(path)
             
-        elif suffix == '.txt':
-            with open(path, 'r', encoding='utf-8') as f:
-                text = f.read()
+        elif suffix in ['.txt', '.csv', '.xml', '.html', '.htm']:
+            # Process text-based files
+            encoding = 'utf-8'
+            try:
+                with open(path, 'r', encoding=encoding) as f:
+                    text = f.read()
+            except UnicodeDecodeError:
+                # Try different encodings
+                for enc in ['latin-1', 'cp1252', 'iso-8859-1']:
+                    try:
+                        with open(path, 'r', encoding=enc) as f:
+                            text = f.read()
+                        encoding = enc
+                        break
+                    except:
+                        continue
+                else:
+                    raise ValueError(f"Unable to decode file {path.name}")
+            
+            # For CSV files, format as table
+            if suffix == '.csv':
+                try:
+                    import pandas as pd
+                    df = pd.read_csv(path, encoding=encoding)
+                    text = df.to_string()
+                except:
+                    pass  # Keep raw text if CSV parsing fails
                 
             # Try to extract tables from text
             tables = self.ocr_engine._extract_tables_cpu(None, text)
@@ -663,10 +800,16 @@ class CPUOnlyOCRSystem:
                 tables=tables,
                 markdown=self.ocr_engine._generate_markdown(text, tables),
                 processing_time=0.01,
-                metadata={'type': 'txt', 'size': len(text)},
+                metadata={'type': suffix[1:], 'size': len(text), 'encoding': encoding},
                 cpu_usage=0,
                 ram_usage_mb=0
             )
+            
+        elif suffix == '.rtf':
+            return await self.document_processor.process_rtf_cpu(path)
+            
+        elif suffix == '.odt':
+            return await self.document_processor.process_odt_cpu(path)
             
         else:
             raise ValueError(f"Unsupported file type: {suffix}")
