@@ -7,13 +7,16 @@ A comprehensive OCR system that supports multiple document formats with configur
 
 ## Features
 
-✅ **Multi-format Support**: PDF, DOCX, PNG, JPEG, TXT
-✅ **German Language Support**: Full umlaut support (ä, ö, ü, Ä, Ö, Ü, ß)
+✅ **Unified API Endpoint**: Single `/ocr` endpoint for all file types
+✅ **Extended Format Support**: PDF, DOCX, PNG, JPEG, TXT, RTF, ODT, HTML, XML, CSV, TIFF, BMP, GIF, WebP
+✅ **Automatic File Type Detection**: Uses magic numbers for accurate MIME type detection
+✅ **German Language Support**: Full umlaut support (ä, ö, ü, Ä, Ö, Ü, ß) with proper Unicode handling
 ✅ **Resource Management**: Optimized for maximum performance (95% CPU, 90% RAM)
 ✅ **Scanned Document Processing**: Handles both native and scanned documents
 ✅ **Table Extraction**: Automatically detects and extracts tables
 ✅ **Concurrent Processing**: Handles multiple files simultaneously
 ✅ **GPU Support**: Uses GPU acceleration when available, falls back to CPU
+✅ **Multiple Upload Methods**: Supports both multipart form data and base64 JSON uploads
 
 ## Resource Configuration
 
@@ -90,15 +93,31 @@ print(f"Confidence: {result.confidence}")
 results = await ocr.process_batch(["doc1.pdf", "doc2.png", "doc3.docx"])
 ```
 
+## What's New
+
+### Version 2.0 - Unified API & Enhanced Format Support
+
+- **Unified `/ocr` Endpoint**: Single endpoint for all file uploads
+- **Automatic File Type Detection**: Uses `python-magic` for accurate MIME type detection
+- **Extended Format Support**: Added RTF, ODT, HTML, XML, CSV, TIFF, BMP, GIF, WebP
+- **Improved Unicode Handling**: Umlauts and special characters display correctly without escape sequences
+- **Enhanced Image Processing**: Better preprocessing for improved OCR accuracy on images with text
+
 ## Project Structure
 
 ```
 /home/nikolai/ocr/
 ├── ocr_system.py              # Main OCR system with resource management
+├── ocr_api.py                 # FastAPI service with unified endpoint
+├── cpu_only_ocr_system.py     # CPU-optimized OCR implementation
 ├── test_document_generator.py # Generates/downloads test documents
 ├── test_ocr_system.py        # Comprehensive test suite
 ├── simple_test.py            # Basic functionality test
 ├── requirements.txt          # Python dependencies
+├── requirements_api.txt      # API service dependencies
+├── requirements_cpu.txt      # CPU-only dependencies
+├── docker-compose.yml        # Docker deployment configuration
+├── Dockerfile               # Container build instructions
 ├── setup.sh                 # System dependencies installer
 ├── test_documents/          # Generated test documents
 └── README.md               # This file
@@ -130,6 +149,21 @@ results = await ocr.process_batch(["doc1.pdf", "doc2.png", "doc3.docx"])
 - `psutil`: Resource monitoring
 - `requests`: Document downloading
 - `beautifulsoup4`: Web scraping
+
+### New Dependencies (v2.0):
+- `python-magic`: Automatic file type detection
+- `striprtf`: RTF file support
+- `odfpy`: ODT file support
+- `lxml`: Enhanced XML/HTML processing
+
+**Note**: On Linux/macOS, you may need to install libmagic:
+```bash
+# Ubuntu/Debian
+sudo apt-get install libmagic1
+
+# macOS
+brew install libmagic
+```
 
 ## Docker Deployment
 
@@ -169,6 +203,24 @@ KEY="your-secret-key-here"
 
 **Important**: Never commit the `.env` file to version control!
 
+### Migration from v1.x to v2.0
+
+If you're upgrading from the previous version, note these changes:
+
+1. **Endpoint Change**: 
+   - Old: `/ocr/file` and `/ocr/base64`
+   - New: `/ocr` (handles both multipart and base64)
+
+2. **No Changes Required for**:
+   - Request parameters (same field names)
+   - Response format (same structure with additional metadata)
+   - Authentication method (same API key)
+
+3. **New Features Available**:
+   - Automatic file type detection
+   - Support for more file formats
+   - Better Unicode handling
+
 ### Health Check
 ```bash
 curl http://localhost:4000/health
@@ -179,31 +231,36 @@ curl http://localhost:4000/health
 curl http://localhost:4000/status
 ```
 
-### OCR File Upload
+### Unified OCR Endpoint
+
+The API now provides a single `/ocr` endpoint that accepts all supported file types and automatically detects the upload method.
+
+#### Multipart File Upload
 ```bash
-# Process a PDF file
+# Process any supported file type
 curl -X POST -F "file=@document.pdf" \
   -F "preserve_formatting=true" \
   -F "key=your-secret-key-here" \
-  http://localhost:4000/ocr/file
+  http://localhost:4000/ocr
 
-# Process an image
-curl -X POST -F "file=@image.png" \
-  -F "preserve_formatting=true" \
-  -F "key=your-secret-key-here" \
-  http://localhost:4000/ocr/file
+# Examples for different formats:
+# PDF
+curl -X POST -F "file=@document.pdf" -F "preserve_formatting=true" -F "key=your-secret-key-here" http://localhost:4000/ocr
 
-# Process a Word document
-curl -X POST -F "file=@document.docx" \
-  -F "preserve_formatting=true" \
-  -F "key=your-secret-key-here" \
-  http://localhost:4000/ocr/file
+# Images (PNG, JPG, TIFF, BMP, GIF, WebP)
+curl -X POST -F "file=@image.png" -F "preserve_formatting=true" -F "key=your-secret-key-here" http://localhost:4000/ocr
+
+# Documents (DOCX, RTF, ODT)
+curl -X POST -F "file=@document.docx" -F "preserve_formatting=true" -F "key=your-secret-key-here" http://localhost:4000/ocr
+
+# Text/Data files (TXT, CSV, HTML, XML)
+curl -X POST -F "file=@data.csv" -F "preserve_formatting=true" -F "key=your-secret-key-here" http://localhost:4000/ocr
 ```
 
-### OCR with Base64 Encoding
+#### Base64 JSON Upload
 ```bash
 # Encode file to base64
-base64 document.pdf > document.b64
+base64 -w 0 document.pdf > document.b64
 
 # Send base64 encoded file
 curl -X POST -H "Content-Type: application/json" \
@@ -213,26 +270,93 @@ curl -X POST -H "Content-Type: application/json" \
     "preserve_formatting": true,
     "key": "your-secret-key-here"
   }' \
-  http://localhost:4000/ocr/base64
+  http://localhost:4000/ocr
 ```
 
 ### Response Format
 ```json
 {
   "success": true,
-  "text": "Extracted text content...",
+  "text": "Extracted text content mit Umlauten: ä, ö, ü...",
   "language": "de",
   "confidence": 0.95,
   "processing_time": 2.34,
   "formatting_preserved": true,
   "tables_found": 1,
+  "error": null,
   "metadata": {
     "filename": "document.pdf",
+    "detected_mime_type": "application/pdf",
+    "file_extension": ".pdf",
     "file_size_mb": 1.23,
     "cpu_usage": 45.2,
     "ram_usage_mb": 234.5
   }
 }
+```
+
+#### Supported File Types
+
+| Format | Extensions | MIME Type |
+|--------|------------|-----------|
+| PDF | .pdf | application/pdf |
+| Images | .png, .jpg, .jpeg, .tiff, .tif, .bmp, .gif, .webp | image/* |
+| Word | .docx | application/vnd.openxmlformats-officedocument.wordprocessingml.document |
+| OpenDocument | .odt | application/vnd.oasis.opendocument.text |
+| Rich Text | .rtf | application/rtf, text/rtf |
+| Plain Text | .txt | text/plain |
+| CSV | .csv | text/csv |
+| HTML | .html, .htm | text/html |
+| XML | .xml | text/xml, application/xml |
+
+### Example Usage in Different Languages
+
+#### Python
+```python
+import requests
+
+# Multipart upload
+with open('document.pdf', 'rb') as f:
+    response = requests.post(
+        'http://localhost:4000/ocr',
+        files={'file': f},
+        data={'key': 'your-secret-key-here', 'preserve_formatting': 'true'}
+    )
+    print(response.json()['text'])
+
+# Base64 upload
+import base64
+with open('document.pdf', 'rb') as f:
+    content = base64.b64encode(f.read()).decode('utf-8')
+    response = requests.post(
+        'http://localhost:4000/ocr',
+        json={
+            'filename': 'document.pdf',
+            'content': content,
+            'key': 'your-secret-key-here',
+            'preserve_formatting': True
+        }
+    )
+    print(response.json()['text'])
+```
+
+#### JavaScript/Node.js
+```javascript
+const FormData = require('form-data');
+const fs = require('fs');
+
+// Multipart upload
+const form = new FormData();
+form.append('file', fs.createReadStream('document.pdf'));
+form.append('key', 'your-secret-key-here');
+form.append('preserve_formatting', 'true');
+
+fetch('http://localhost:4000/ocr', {
+    method: 'POST',
+    body: form
+})
+.then(res => res.json())
+.then(data => console.log(data.text));
 ```
 
 ## CPU-Only Setup
