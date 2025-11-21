@@ -156,7 +156,7 @@ async def system_status():
         "limits": {
             "max_cpu_percent": 70,
             "max_ram_gb": 2,
-            "max_file_size_mb": 50
+            "max_file_size_mb": 250
         }
     }
 
@@ -255,12 +255,12 @@ async def unified_ocr(
             detail="No file provided. Send either multipart file or base64 encoded content"
         )
     
-    # Check file size (50MB limit)
+    # Check file size (250MB limit)
     file_size_mb = len(contents) / (1024 * 1024)
-    if file_size_mb > 50:
+    if file_size_mb > 250:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large ({file_size_mb:.1f}MB). Maximum size: 50MB"
+            detail=f"File too large ({file_size_mb:.1f}MB). Maximum size: 250MB"
         )
     
     # Detect file type

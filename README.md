@@ -29,6 +29,7 @@ MAX_CPU_PERCENT = 95  # Uses up to 95% CPU for maximum performance
 MAX_RAM_PERCENT = 90  # Uses up to 90% RAM with safeguards
 MAX_RAM_GB = 8        # Increased RAM limit for large documents
 MAX_WORKERS = 8       # Uses all CPU cores (up to 8) for parallel processing
+MAX_FILE_SIZE_MB = 250  # Maximum file size per upload
 ```
 
 ### Key Features:
@@ -37,12 +38,24 @@ MAX_WORKERS = 8       # Uses all CPU cores (up to 8) for parallel processing
 - **Adaptive Image Resizing**: Reduces image size when memory is constrained
 - **Error Recovery**: Continues processing even if individual files fail
 - **Parallel Processing**: Processes multiple files simultaneously for maximum throughput
+- **Large File Support**: Handles files up to 250 MB with intelligent memory management
 
 ### Safety Mechanisms:
 - Leaves 5% CPU headroom for system stability
 - Monitors RAM usage and prevents out-of-memory errors
 - Exponential backoff when resources are constrained
 - Automatic cleanup after each file processing
+- Dynamic image downscaling when RAM usage exceeds 70%
+- Page-by-page PDF processing to prevent memory spikes
+
+### File Size Limits & Recommendations:
+- **Maximum file size**: 250 MB per file
+- **PDFs**: ✅ Full 250 MB supported (page-by-page processing)
+- **Text documents** (DOCX, RTF, ODT): ✅ Full 250 MB supported
+- **Images** (PNG, JPEG, TIFF): ⚠️ 250 MB supported with auto-resize
+  - Very large images (>10,000px) automatically reduced when memory constrained
+  - For optimal performance with multiple concurrent uploads, consider images < 100 MB
+- **Recommended**: For high-volume concurrent processing, limit images to 50-100 MB each
 
 ## Installation
 
