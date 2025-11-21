@@ -10,7 +10,7 @@ services:
       - OCR_API_PORT=4000
       - OCR_API_HOST=0.0.0.0
       - PYTHONUNBUFFERED=1
-      - KEY=${KEY}
+      - KEY=h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
     volumes:
       - ocr-logs:/app/logs
       - ocr-temp:/app/temp
